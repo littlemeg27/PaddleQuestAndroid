@@ -36,10 +36,10 @@ import com.example.paddlequest.screens.SettingsScreen
 import com.example.paddlequest.screens.SignInScreen
 import com.example.paddlequest.screens.SuggestedTripsScreen
 import com.example.paddlequest.screens.WeatherScreen
+import com.google.android.gms.maps.model.LatLng
 
 @Composable
-fun PaddleQuestApp()
-{
+fun PaddleQuestApp() {
     val navController = rememberNavController()
     val selectedPinViewModel: SelectedPinViewModel = viewModel()
 
@@ -55,66 +55,68 @@ fun PaddleQuestApp()
     Scaffold(
         bottomBar =
             {
-            NavigationBar {
-                val navBackStackEntry by navController.currentBackStackEntryAsState()
-                val currentDestination = navBackStackEntry?.destination
+                NavigationBar {
+                    val navBackStackEntry by navController.currentBackStackEntryAsState()
+                    val currentDestination = navBackStackEntry?.destination
 
-                bottomNavItems.forEach { screen ->
-                    val selected = currentDestination?.hierarchy?.any { it.route == screen.route } == true
+                    bottomNavItems.forEach { screen ->
+                        val selected =
+                            currentDestination?.hierarchy?.any { it.route == screen.route } == true
 
-                    NavigationBarItem(
-                        icon = {
-                            Icon(
-                                imageVector = if (selected) screen.icon else when (screen)
+                        NavigationBarItem(
+                            icon = {
+                                Icon(
+                                    imageVector = if (selected) screen.icon else when (screen) {
+                                        is Screen.Map -> Icons.Outlined.Place
+                                        is Screen.FloatPlan -> Icons.Outlined.Create
+                                        is Screen.Weather -> Icons.Outlined.Cloud
+                                        is Screen.Profile -> Icons.Outlined.Person
+                                        is Screen.SuggestedTripsScreen -> Icons.Outlined.Map
+                                        is Screen.Settings -> Icons.Outlined.Settings
+                                        else -> Icons.Outlined.AccountCircle
+                                    },
+                                    contentDescription = screen.label
+                                )
+                            },
+                            label = { Text(screen.label) },
+                            selected = selected,
+                            onClick = {
+                                navController.navigate(screen.route)
                                 {
-                                    is Screen.Map -> Icons.Outlined.Place
-                                    is Screen.FloatPlan -> Icons.Outlined.Create
-                                    is Screen.Weather -> Icons.Outlined.Cloud
-                                    is Screen.Profile -> Icons.Outlined.Person
-                                    is Screen.SuggestedTripsScreen -> Icons.Outlined.Map
-                                    is Screen.Settings -> Icons.Outlined.Settings
-                                    else -> Icons.Outlined.AccountCircle
-                                },
-                                contentDescription = screen.label
-                            )
-                        },
-                        label = { Text(screen.label) },
-                        selected = selected,
-                        onClick = {
-                            navController.navigate(screen.route)
-                            {
-                                popUpTo(navController.graph.findStartDestination().id)
-                                {
-                                    saveState = true
+                                    popUpTo(navController.graph.findStartDestination().id)
+                                    {
+                                        saveState = true
+                                    }
+                                    launchSingleTop = true
+                                    restoreState = true
                                 }
-                                launchSingleTop = true
-                                restoreState = true
                             }
-                        }
-                    )
+                        )
+                    }
                 }
             }
-        }
-    ) {
-        innerPadding ->
+    ) { innerPadding ->
         NavHost(
             navController = navController,
             startDestination = Screen.SignIn.route,
             modifier = Modifier.padding(innerPadding)
         ) {
             composable(Screen.SignIn.route) { SignInScreen(navController) }
-            composable(Screen.Map.route) { MapScreen(navController = navController, selectedPinViewModel = selectedPinViewModel) }
+            composable(Screen.Map.route) {
+                MapScreen(
+                    navController = navController,
+                    selectedPinViewModel = selectedPinViewModel
+                )
+            }
             composable(
                 route = Screen.FloatPlan.route + "?putIn={putIn}&takeOut={takeOut}",
                 arguments = listOf(
-                    navArgument("putIn")
-                    {
+                    navArgument("putIn") {
                         type = NavType.StringType
                         nullable = true
                         defaultValue = null
                     },
-                    navArgument("takeOut")
-                    {
+                    navArgument("takeOut") {
                         type = NavType.StringType
                         nullable = true
                         defaultValue = null
@@ -127,23 +129,47 @@ fun PaddleQuestApp()
             }
             composable(Screen.Weather.route) { WeatherScreen() }
             composable(Screen.Profile.route) { ProfileScreen() }
-            composable(Screen.SuggestedTripsScreen.route)
-            {
+            composable(
+                route = "suggested_trips/{lat}/{lon}",
+                arguments = listOf(
+                    navArgument("lat") { type = NavType.StringType },
+                    navArgument("lon") { type = NavType.StringType }
+                )
+            ) { backStackEntry ->
+                val lat = backStackEntry.arguments?.getString("lat")?.toDoubleOrNull() ?: 0.0
+                val lon = backStackEntry.arguments?.getString("lon")?.toDoubleOrNull() ?: 0.0
+
+                SuggestedTripsScreen(
+                    selectedLocation = LatLng(lat, lon),
+                    selectedStateFromMap = null,
+                    navController = navController,
+                    onDismiss = { navController.popBackStack() },
+                    onSelectTrip = { putIn, takeOut ->
+                        navController.navigate(
+                            Screen.FloatPlan.route + "?putIn=${putIn.accessName}&takeOut=${takeOut.accessName}"
+                        )
+                    }
+                )
+            }
+
+            composable(Screen.Settings.route) { SettingsScreen() }
+
+            // Keep your existing SuggestedTripsScreen route for bottom bar taps (no params)
+            composable(Screen.SuggestedTripsScreen.route) {
                 val selectedLocation by selectedPinViewModel.selectedPin.observeAsState()
                 val selectedState by selectedPinViewModel.selectedState.observeAsState()
                 SuggestedTripsScreen(
                     selectedLocation = selectedLocation,
                     selectedStateFromMap = selectedState,
                     navController = navController,
-                    onDismiss = {
-                        navController.popBackStack()
-                    },
+                    onDismiss = { navController.popBackStack() },
                     onSelectTrip = { putIn, takeOut ->
-                        navController.navigate(Screen.FloatPlan.route + "?putIn=${putIn.accessName}&takeOut=${takeOut.accessName}")
+                        navController.navigate(
+                            Screen.FloatPlan.route + "?putIn=${putIn.accessName}&takeOut=${takeOut.accessName}"
+                        )
                     }
                 )
             }
-            composable(Screen.Settings.route) { SettingsScreen() }
         }
     }
 }
