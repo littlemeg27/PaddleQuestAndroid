@@ -29,8 +29,8 @@ import java.util.Locale
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SuggestedTripsScreen(
-    selectedLocation: LatLng?,           // from map pin or current location
-    selectedStateFromMap: String?,       // from dropdown on MapScreen
+    selectedLocation: LatLng?,           // from map pin
+    selectedStateFromMap: String?,       // from dropdown
     navController: NavController,
     onDismiss: () -> Unit,
     onSelectTrip: (MarkerData, MarkerData) -> Unit
@@ -38,43 +38,34 @@ fun SuggestedTripsScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-
     // State
     var effectiveLocation by remember { mutableStateOf(selectedLocation) }
     var currentState by remember { mutableStateOf(selectedStateFromMap ?: "Detecting…") }
-    var locationLoading by remember { mutableStateOf(selectedLocation == null && selectedStateFromMap == null) }
+    var locationLoading by remember { mutableStateOf(false) }
     var locationError by remember { mutableStateOf<String?>(null) }
 
     var markers by remember { mutableStateOf(emptyList<MarkerData>()) }
     var isLoadingMarkers by remember { mutableStateOf(true) }
 
-
-    // Priority: dropdown state > pin location > device GPS
+    // Priority logic: dropdown > selected pin > device GPS
     LaunchedEffect(selectedLocation, selectedStateFromMap) {
-        Log.d("SuggestedTrips", "Screen init → pin=$selectedLocation, dropdown state=$selectedStateFromMap")
+        Log.d("SuggestedTrips", "Init - pin=$selectedLocation, dropdownState=$selectedStateFromMap")
 
-        // 1. Use dropdown state if passed
-        if (selectedStateFromMap != null && selectedStateFromMap.isNotBlank()) {
+        // 1. Highest priority: State from dropdown
+        if (!selectedStateFromMap.isNullOrBlank()) {
             currentState = selectedStateFromMap
             Log.d("SuggestedTrips", "Using dropdown state: $currentState")
-            locationLoading = false
         }
-
-        // 2. Use passed pin location if available
-        if (selectedLocation != null) {
+        // 2. Use selected pin location
+        else if (selectedLocation != null) {
             effectiveLocation = selectedLocation
-            // If no dropdown state, try to geocode this pin
-            if (selectedStateFromMap == null || selectedStateFromMap.isBlank()) {
-                val state = getStateFromLatLng(context, selectedLocation)
-                currentState = state ?: "Unknown area"
-                Log.d("SuggestedTrips", "State from pin: $currentState")
-            }
-            locationLoading = false
+            val state = getStateFromLatLng(context, selectedLocation)
+            currentState = state ?: "Unknown area"
+            Log.d("SuggestedTrips", "State from pin: $currentState")
         }
-
-        // 3. Fallback to device location only if nothing passed
-        if (selectedLocation == null && (selectedStateFromMap == null || selectedStateFromMap.isBlank())) {
-            Log.d("SuggestedTrips", "No passed data → falling back to device location")
+        // 3. Fallback to device location
+        else {
+            Log.d("SuggestedTrips", "No data passed → trying device location")
             locationLoading = true
 
             val hasFine = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
@@ -83,70 +74,46 @@ fun SuggestedTripsScreen(
             if (hasFine || hasCoarse) {
                 try {
                     val fused = LocationServices.getFusedLocationProviderClient(context)
-                    val location = fused.lastLocation.await()
-                    if (location != null) {
-                        effectiveLocation = LatLng(location.latitude, location.longitude)
+                    val loc = fused.lastLocation.await()
+                    if (loc != null) {
+                        effectiveLocation = LatLng(loc.latitude, loc.longitude)
                         val state = getStateFromLatLng(context, effectiveLocation!!)
-                        currentState = state ?: "Unknown"
-                        Log.d("SuggestedTrips", "Device location → state=$currentState")
-                    } else {
-                        currentState = "No device location"
+                        currentState = state ?: "Unknown area"
+                        Log.d("SuggestedTrips", "Device location state: $currentState")
                     }
                 } catch (e: Exception) {
                     locationError = "Failed to get device location"
-                    Log.e("SuggestedTrips", "Device location error", e)
+                    Log.e("SuggestedTrips", "Location error", e)
                 }
-            } else {
-                locationError = "Location permission needed"
             }
             locationLoading = false
         }
-
-        Log.d("SuggestedTrips", "Final effective location: $effectiveLocation, final state: $currentState")
     }
 
-    // Load markers when state/location is valid
-    LaunchedEffect(key1 = currentState, key2 = effectiveLocation) {
-        Log.d("SuggestedTrips", "Marker loading triggered → state='$currentState', loc=$effectiveLocation")
+    // Load markers
+    LaunchedEffect(currentState, effectiveLocation) {
+        Log.d("SuggestedTrips", "Loading markers → state='$currentState', loc=$effectiveLocation")
 
         isLoadingMarkers = true
 
-        if (effectiveLocation == null) {
-            Log.d("SuggestedTrips", "No location → clearing markers")
+        if (effectiveLocation == null || currentState.contains("Detecting", ignoreCase = true) ||
+            currentState.contains("Unknown", ignoreCase = true) || currentState.contains("No ", ignoreCase = true)) {
             markers = emptyList()
             isLoadingMarkers = false
             return@LaunchedEffect
         }
-
-        if (currentState.isBlank() ||
-            currentState.contains("Detecting", ignoreCase = true) ||
-            currentState.contains("No location", ignoreCase = true) ||
-            currentState.contains("No device", ignoreCase = true) ||
-            currentState.contains("error", ignoreCase = true) ||
-            currentState.contains("Permission", ignoreCase = true) ||
-            currentState.contains("Unknown", ignoreCase = true)
-        ) {
-            Log.d("SuggestedTrips", "Invalid state '$currentState' → clearing markers")
-            markers = emptyList()
-            isLoadingMarkers = false
-            return@LaunchedEffect
-        }
-
-        Log.d("SuggestedTrips", "Fetching ramps for: $currentState")
 
         try {
             val loaded = loadMarkersForState(context, currentState)
             markers = loaded
             Log.d("SuggestedTrips", "Loaded ${loaded.size} ramps for $currentState")
         } catch (e: Throwable) {
-            Log.e("SuggestedTrips", "Failed to load ramps", e)
+            Log.e("SuggestedTrips", "Load failed", e)
             markers = emptyList()
         } finally {
             isLoadingMarkers = false
-            Log.d("SuggestedTrips", "Marker loading complete → isLoadingMarkers = $isLoadingMarkers")
         }
     }
-
 
     // UI
     Scaffold(
@@ -155,93 +122,57 @@ fun SuggestedTripsScreen(
                 title = { Text("Suggested Trips") },
                 navigationIcon = {
                     IconButton(onClick = { navController.popBackStack() }) {
-                        Icon(Icons.AutoMirrored.Default.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Default.ArrowBack, "Back")
                     }
                 }
             )
         }
-    ) { innerPadding ->
+    ) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
+                .padding(padding)
                 .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             if (locationLoading || isLoadingMarkers) {
                 CircularProgressIndicator()
-                Spacer(modifier = Modifier.height(16.dp))
-                Text("Loading nearby kayak ramps...")
+                Spacer(Modifier.height(16.dp))
+                Text("Loading nearby ramps...")
             } else if (locationError != null) {
                 Text(locationError!!, color = MaterialTheme.colorScheme.error)
-                Spacer(modifier = Modifier.height(16.dp))
-                Button(onClick = onDismiss) {
-                    Text("Go Back")
-                }
             } else if (effectiveLocation == null) {
-                Text("No location selected. Go back and pick a pin on the map.")
-                Spacer(modifier = Modifier.height(16.dp))
-                Button(onClick = onDismiss) {
-                    Text("Go Back")
-                }
+                Text("No location selected.")
             } else if (markers.isEmpty()) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("No kayak ramps found near this location in $currentState.")
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text("Try zooming out on the map or selecting a different area.", style = MaterialTheme.typography.bodySmall)
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Button(onClick = onDismiss) {
-                        Text("Go Back to Map")
-                    }
-                }
+                Text("No kayak ramps found in $currentState near this location.")
+                Spacer(Modifier.height(8.dp))
+                Text("Try selecting a different pin or state.", style = MaterialTheme.typography.bodySmall)
             } else {
                 Text(
-                    "Showing ramps near:\n${String.format(Locale.US, "%.4f", effectiveLocation!!.latitude)}, " +
+                    "Ramps near ${String.format(Locale.US, "%.4f", effectiveLocation!!.latitude)}, " +
                             "${String.format(Locale.US, "%.4f", effectiveLocation!!.longitude)} ($currentState)",
-                    style = MaterialTheme.typography.bodyMedium,
                     textAlign = TextAlign.Center
                 )
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(Modifier.height(16.dp))
 
                 LazyColumn {
                     val grouped = groupRampsByWaterbody(markers)
-
                     grouped.forEach { group ->
-                        item {
-                            Text(
-                                group.waterbody,
-                                style = MaterialTheme.typography.titleLarge,
-                                modifier = Modifier.padding(top = 16.dp, bottom = 8.dp)
-                            )
-                        }
+                        item { Text(group.waterbody, style = MaterialTheme.typography.titleLarge) }
 
-                        val sortedRamps = group.ramps.sortedBy {
-                            haversineDistance(effectiveLocation!!, it.getLatLng())
-                        }
+                        val sorted = group.ramps.sortedBy { haversineDistance(effectiveLocation!!, it.getLatLng()) }
 
-                        sortedRamps.windowed(size = 2, step = 1).forEach { (putIn, takeOut) ->
-                            val distanceKm = haversineDistance(putIn.getLatLng(), takeOut.getLatLng())
-                            val distanceMiles = distanceKm * 0.621371
-
-                            val minTime = (distanceMiles / 4).toInt().coerceAtLeast(1)
-                            val maxTime = (distanceMiles / 2).toInt().coerceAtLeast(minTime)
-
+                        sorted.windowed(2, 1).forEach { (putIn, takeOut) ->
+                            val distMiles = haversineDistance(putIn.getLatLng(), takeOut.getLatLng()) * 0.621371
                             item {
                                 Card(
                                     onClick = { onSelectTrip(putIn, takeOut) },
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 6.dp)
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)
                                 ) {
-                                    Column(modifier = Modifier.padding(16.dp)) {
-                                        Text(
-                                            "${putIn.accessName} → ${takeOut.accessName}",
-                                            style = MaterialTheme.typography.titleMedium
-                                        )
-                                        Text("Distance: ${String.format(Locale.US, "%.1f", distanceMiles)} miles")
-                                        Text("Estimated time: $minTime–$maxTime hours")
+                                    Column(Modifier.padding(16.dp)) {
+                                        Text("${putIn.accessName} → ${takeOut.accessName}", style = MaterialTheme.typography.titleMedium)
+                                        Text("Distance: ${String.format(Locale.US, "%.1f", distMiles)} miles")
                                         Text("River: ${putIn.riverName}")
-                                        Text("Type: ${putIn.type} • ${putIn.county}, ${putIn.state}")
                                     }
                                 }
                             }
@@ -250,12 +181,9 @@ fun SuggestedTripsScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.weight(1f))
+            Spacer(Modifier.weight(1f))
 
-            Button(
-                onClick = onDismiss,
-                modifier = Modifier.fillMaxWidth()
-            ) {
+            Button(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
                 Text("Close")
             }
         }

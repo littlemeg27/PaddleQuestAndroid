@@ -59,7 +59,7 @@ fun MapScreen(
     var expanded by remember { mutableStateOf(false) }
 
     var markers by remember { mutableStateOf(emptyList<MarkerData>()) }
-    var isLoadingMarkers by remember { mutableStateOf(false) } // start false to avoid initial spin
+    var isLoadingMarkers by remember { mutableStateOf(false) }
 
     val availableStates = listOf(
         "Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado", "Connecticut", "Delaware",
@@ -77,6 +77,7 @@ fun MapScreen(
 
     val selectedPin by selectedPinViewModel.selectedPin.observeAsState()
 
+    // Load current device location
     suspend fun loadCurrentLocation() {
         if (!hasLocationPermission) {
             currentState = "Permission required"
@@ -105,7 +106,7 @@ fun MapScreen(
         }
     }
 
-    // Permission handling (unchanged)
+    // Permission handling
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { grants ->
@@ -129,121 +130,111 @@ fun MapScreen(
         if (hasLocationPermission) {
             loadCurrentLocation()
         } else {
-            permissionLauncher.launch(
-                arrayOf(
-                    Manifest.permission.ACCESS_FINE_LOCATION,
-                    Manifest.permission.ACCESS_COARSE_LOCATION
-                )
-            )
+            permissionLauncher.launch(arrayOf(
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            ))
         }
     }
 
-    // ───────────────────────────────────────────────
-    // Load markers when selectedState or currentState changes
-    // ───────────────────────────────────────────────
-    LaunchedEffect(key1 = selectedState, key2 = currentState) {
-        Log.d("MapScreen", "Reload triggered - selectedState=$selectedState, currentState=$currentState")
-
+    // Load markers when state changes
+    LaunchedEffect(selectedState, currentState) {
         val stateToLoad = selectedState ?: currentState
+        Log.d("MapScreen", "Reload triggered - selectedState=$selectedState, currentState=$currentState, loading=$stateToLoad")
 
-        if (stateToLoad.isBlank() ||
-            stateToLoad.contains("Detecting", ignoreCase = true) ||
+        if (stateToLoad.isBlank() || stateToLoad.contains("Detecting", ignoreCase = true) ||
             stateToLoad.contains("No location", ignoreCase = true) ||
             stateToLoad.contains("error", ignoreCase = true) ||
             stateToLoad.contains("Permission", ignoreCase = true) ||
             stateToLoad.contains("Unknown", ignoreCase = true)
         ) {
-            Log.d("MapScreen", "Invalid state → clearing markers")
             markers = emptyList()
             isLoadingMarkers = false
             return@LaunchedEffect
         }
 
-        Log.d("MapScreen", "Loading markers for state: $stateToLoad")
         isLoadingMarkers = true
-
         try {
             markers = loadMarkersForState(context, stateToLoad)
             Log.d("MapScreen", "Loaded ${markers.size} markers for $stateToLoad")
         } catch (e: Exception) {
-            Log.e("MapScreen", "Marker load failed for $stateToLoad", e)
+            Log.e("MapScreen", "Failed to load markers for $stateToLoad", e)
             markers = emptyList()
         } finally {
             isLoadingMarkers = false
         }
     }
 
-    // ───────────────────────────────────────────────
-    // NEW: Move camera when selected state changes
-    // ───────────────────────────────────────────────
+    // Move camera when selected state changes
     LaunchedEffect(selectedState) {
         selectedState?.let { state ->
             selectedPinViewModel.setSelectedState(state)
+
             val stateCenter = when (state.lowercase()) {
-                "alabama" -> LatLng(32.3182, -86.9023)
-                "alaska" -> LatLng(64.2008, -149.4937)
+                "alabama" -> LatLng(32.7794, -86.8287)
+                "alaska" -> LatLng(63.5888, -154.4931)
                 "arizona" -> LatLng(34.0489, -111.0937)
-                "arkansas" -> LatLng(35.2010, -91.8318)
-                "california" -> LatLng(36.7783, -119.4179)
-                "colorado" -> LatLng(39.5501, -105.7821)
+                "arkansas" -> LatLng(34.9697, -92.3731)
+                "california" -> LatLng(37.2726, -119.2702)
+                "colorado" -> LatLng(39.1130, -105.3580)
                 "connecticut" -> LatLng(41.6032, -73.0877)
-                "delaware" -> LatLng(38.9108, -75.5277)
-                "florida" -> LatLng(27.6648, -81.5158)
-                "georgia" -> LatLng(32.1656, -82.9001)
+                "delaware" -> LatLng(39.1582, -75.5244)
+                "florida" -> LatLng(28.6305, -82.4497)
+                "georgia" -> LatLng(32.9866, -83.6487)
                 "hawaii" -> LatLng(19.8968, -155.5828)
-                "idaho" -> LatLng(44.0682, -114.7420)
-                "illinois" -> LatLng(40.6331, -89.3985)
-                "indiana" -> LatLng(40.5512, -85.6024)
-                "iowa" -> LatLng(41.8780, -93.0977)
-                "kansas" -> LatLng(39.0119, -98.4842)
-                "kentucky" -> LatLng(37.8393, -84.2700)
-                "louisiana" -> LatLng(30.9843, -91.9623)
-                "maine" -> LatLng(45.2538, -69.4455)
+                "idaho" -> LatLng(44.3509, -114.6130)
+                "illinois" -> LatLng(40.0797, -89.4337)
+                "indiana" -> LatLng(39.8282, -86.1581)
+                "iowa" -> LatLng(42.0324, -93.5815)
+                "kansas" -> LatLng(38.5266, -96.7265)
+                "kentucky" -> LatLng(37.5347, -85.3021)
+                "louisiana" -> LatLng(31.1695, -91.8678)
+                "maine" -> LatLng(45.3695, -69.2428)
                 "maryland" -> LatLng(39.0458, -76.6413)
                 "massachusetts" -> LatLng(42.4072, -71.3824)
-                "michigan" -> LatLng(44.3148, -85.6024)
-                "minnesota" -> LatLng(46.7296, -94.6859)
-                "mississippi" -> LatLng(32.3547, -89.3985)
-                "missouri" -> LatLng(37.9643, -91.8318)
-                "montana" -> LatLng(46.8797, -110.3626)
+                "michigan" -> LatLng(44.1822, -84.5060)
+                "minnesota" -> LatLng(46.2807, -94.3053)
+                "mississippi" -> LatLng(32.7416, -89.6787)
+                "missouri" -> LatLng(38.5739, -92.6030)
+                "montana" -> LatLng(47.0527, -109.6333)
                 "nebraska" -> LatLng(41.4925, -99.9018)
-                "nevada" -> LatLng(38.8026, -116.4194)
-                "new hampshire" -> LatLng(43.1939, -71.5724)
-                "new jersey" -> LatLng(40.0583, -74.4057)
+                "nevada" -> LatLng(39.8760, -117.2240)
+                "new hampshire" -> LatLng(43.6805, -71.5724)
+                "new jersey" -> LatLng(40.1900, -74.6728)
                 "new mexico" -> LatLng(34.5199, -105.8701)
-                "new york" -> LatLng(40.7128, -74.0060)
-                "north carolina" -> LatLng(35.7596, -79.0193) // Charlotte / Rock Hill area
-                "north dakota" -> LatLng(47.1164, -101.2996)
+                "new york" -> LatLng(42.9134, -75.5963)
+                "north carolina" -> LatLng(35.7596, -79.0193)
+                "north dakota" -> LatLng(47.6506, -100.4370)
                 "ohio" -> LatLng(40.4173, -82.9071)
                 "oklahoma" -> LatLng(35.4676, -97.5164)
                 "oregon" -> LatLng(43.8041, -120.5542)
-                "pennsylvania" -> LatLng(41.2033, -77.1945)
+                "pennsylvania" -> LatLng(40.8960, -77.7097)
                 "rhode island" -> LatLng(41.5801, -71.4774)
-                "south carolina" -> LatLng(33.8361, -81.1637) // near Rock Hill
-                "south dakota" -> LatLng(43.9695, -99.9018)
-                "tennessee" -> LatLng(35.5175, -86.5804)
-                "texas" -> LatLng(31.9686, -99.9018)
-                "utah" -> LatLng(39.3209, -111.0937)
-                "vermont" -> LatLng(44.5588, -72.5778)
-                "virginia" -> LatLng(37.4316, -78.6569)
-                "washington" -> LatLng(47.7511, -120.7401)
+                "south carolina" -> LatLng(33.8361, -81.1637)
+                "south dakota" -> LatLng(44.2998, -99.4388)
+                "tennessee" -> LatLng(35.8606, -86.3500)
+                "texas" -> LatLng(31.5469, -99.9018)
+                "utah" -> LatLng(39.4192, -111.9507)
+                "vermont" -> LatLng(44.0459, -72.7107)
+                "virginia" -> LatLng(37.7693, -78.1700)
+                "washington" -> LatLng(47.4009, -121.4905)
                 "west virginia" -> LatLng(38.5976, -80.4549)
-                "wisconsin" -> LatLng(43.7844, -88.7879)
-                "wyoming" -> LatLng(43.0760, -107.2903)
+                "wisconsin" -> LatLng(44.6243, -89.9941)
+                "wyoming" -> LatLng(42.7559, -107.3025)
                 else -> null
             }
 
             stateCenter?.let { center ->
-                Log.d("MapScreen", "Animating camera to $state center: $center")
+                Log.d("MapScreen", "Moving camera to $state center: $center")
                 cameraPositionState.animate(
-                    CameraUpdateFactory.newLatLngZoom(center, 6f), // 6f = good state-level zoom
-                    durationMs = 1000
+                    CameraUpdateFactory.newLatLngZoom(center, 6.5f),
+                    durationMs = 1200
                 )
             }
         }
     }
 
-    // Center on device location when it updates (fallback)
+    // Center on device location when available
     LaunchedEffect(currentLocation) {
         currentLocation?.let { loc ->
             Log.d("MapScreen", "Centering on device location: $loc")
@@ -255,28 +246,22 @@ fun MapScreen(
     }
 
     val mapProperties by remember(hasLocationPermission) {
-        mutableStateOf(
-            MapProperties(
-                isMyLocationEnabled = hasLocationPermission,
-                mapType = MapType.HYBRID
-            )
-        )
+        mutableStateOf(MapProperties(
+            isMyLocationEnabled = hasLocationPermission,
+            mapType = MapType.HYBRID
+        ))
     }
 
     val mapUiSettings by remember(hasLocationPermission) {
-        mutableStateOf(
-            MapUiSettings(
-                myLocationButtonEnabled = hasLocationPermission,
-                zoomControlsEnabled = false,
-                compassEnabled = true,
-                mapToolbarEnabled = false
-            )
-        )
+        mutableStateOf(MapUiSettings(
+            myLocationButtonEnabled = hasLocationPermission,
+            zoomControlsEnabled = false,
+            compassEnabled = true,
+            mapToolbarEnabled = false
+        ))
     }
 
-    // ───────────────────────────────────────────────
     // UI Layout
-    // ───────────────────────────────────────────────
     Column(modifier = Modifier.fillMaxSize()) {
         ExposedDropdownMenuBox(
             expanded = expanded,
@@ -314,7 +299,7 @@ fun MapScreen(
                         selectedState = null
                         expanded = false
                         Log.d("MapScreen", "Switched to current location")
-                        scope.launch { loadCurrentLocation() } // force refresh device location
+                        scope.launch { loadCurrentLocation() }
                     }
                 )
             }
@@ -355,9 +340,7 @@ fun MapScreen(
                                 val loc = fusedLocationClient.lastLocation.await()
                                 loc?.let {
                                     cameraPositionState.animate(
-                                        CameraUpdateFactory.newLatLngZoom(
-                                            LatLng(it.latitude, it.longitude), 15f
-                                        )
+                                        CameraUpdateFactory.newLatLngZoom(LatLng(it.latitude, it.longitude), 15f)
                                     )
                                 }
                             } catch (e: Exception) {
@@ -365,74 +348,32 @@ fun MapScreen(
                             }
                         }
                     },
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(16.dp)
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)
                 ) {
-                    Icon(Icons.Default.MyLocation, contentDescription = "My location")
+                    Icon(Icons.Default.MyLocation, "My location")
                 }
             }
 
             FloatingActionButton(
                 onClick = { scope.launch { loadCurrentLocation() } },
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(16.dp),
+                modifier = Modifier.align(Alignment.TopStart).padding(16.dp),
                 containerColor = MaterialTheme.colorScheme.secondaryContainer
             ) {
-                Icon(Icons.Default.Refresh, contentDescription = "Refresh")
-            }
-
-            // Zoom controls
-            Column(
-                modifier = Modifier
-                    .align(Alignment.CenterEnd)
-                    .padding(end = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                FloatingActionButton(
-                    onClick = {
-                        scope.launch {
-                            cameraPositionState.animate(CameraUpdateFactory.zoomIn(), 300)
-                        }
-                    },
-                    modifier = Modifier.size(48.dp)
-                ) {
-                    Icon(Icons.Default.ZoomIn, "Zoom In")
-                }
-
-                FloatingActionButton(
-                    onClick = {
-                        scope.launch {
-                            cameraPositionState.animate(CameraUpdateFactory.zoomOut(), 300)
-                        }
-                    },
-                    modifier = Modifier.size(48.dp)
-                ) {
-                    Icon(Icons.Default.ZoomOut, "Zoom Out")
-                }
+                Icon(Icons.Default.Refresh, "Refresh")
             }
         }
 
         Button(
-            onClick =
-                {
+            onClick = {
                 val loc = currentLocation ?: selectedPin
-
-                if (loc != null)
-                {
+                if (loc != null) {
                     navController.navigate("suggested_trips/${loc.latitude}/${loc.longitude}")
-                }
-                else
-                {
+                } else {
                     Toast.makeText(context, "No location available", Toast.LENGTH_SHORT).show()
                 }
             },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp)
-        )
-        {
+            modifier = Modifier.fillMaxWidth().padding(16.dp)
+        ) {
             Text("Suggest Trips Near Location")
         }
     }
