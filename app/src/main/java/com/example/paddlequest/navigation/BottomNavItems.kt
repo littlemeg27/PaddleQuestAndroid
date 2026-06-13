@@ -19,15 +19,30 @@ import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.ui.graphics.vector.ImageVector
 
-sealed class Screen(val route: String, val label: String, val icon: ImageVector)
-{
+sealed class Screen(val route: String, val label: String, val icon: ImageVector) {
     object SignIn : Screen("signin", "Sign In", Icons.Default.Login)
     object Map : Screen("map", "Map", Icons.Default.Place)
     object FloatPlan : Screen("floatplan", "Float Plan", Icons.Default.Create)
     object Weather : Screen("weather", "Weather", Icons.Default.Cloud)
     object Profile : Screen("profile", "Profile", Icons.Default.Person)
+
+    // Base route for bottom nav + deep links
     object SuggestedTripsScreen : Screen("suggestedTripsScreen", "Trips", Icons.Default.Map)
+
     object Settings : Screen("settings", "Settings", Icons.Default.Settings)
+
+    // Helper for parameterized navigation
+    companion object {
+        const val SUGGESTED_TRIPS_ROUTE = "suggestedTripsScreen/{lat}/{lon}/{state?}"
+
+        fun suggestedTripsDestination(lat: Double, lon: Double, state: String? = null): String {
+            return if (state != null) {
+                "suggestedTripsScreen/$lat/$lon/$state"
+            } else {
+                "suggestedTripsScreen/$lat/$lon"
+            }
+        }
+    }
 }
 
 data class NavItem(

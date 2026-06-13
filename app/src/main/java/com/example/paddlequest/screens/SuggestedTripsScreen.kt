@@ -30,15 +30,13 @@ import java.util.Locale
 @Composable
 fun SuggestedTripsScreen(
     selectedLocation: LatLng?,           // from map pin
-    selectedStateFromMap: String?,       // from dropdown
+    selectedStateFromMap: String?,       // from dropdown (highest priority)
     navController: NavController,
     onDismiss: () -> Unit,
     onSelectTrip: (MarkerData, MarkerData) -> Unit
 ) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
 
-    // State
     var effectiveLocation by remember { mutableStateOf(selectedLocation) }
     var currentState by remember { mutableStateOf(selectedStateFromMap ?: "Detecting…") }
     var locationLoading by remember { mutableStateOf(false) }
@@ -47,23 +45,33 @@ fun SuggestedTripsScreen(
     var markers by remember { mutableStateOf(emptyList<MarkerData>()) }
     var isLoadingMarkers by remember { mutableStateOf(true) }
 
-    // Priority logic: dropdown > selected pin > device GPS
+    // Priority: Dropdown > Pin > Device GPS
     LaunchedEffect(selectedLocation, selectedStateFromMap) {
-        Log.d("SuggestedTrips", "Init - pin=$selectedLocation, dropdownState=$selectedStateFromMap")
+        Log.d("SuggestedTrips", "Init - pin=$selectedLocation, dropdown=$selectedStateFromMap")
 
-        // 1. Highest priority: State from dropdown
+        // 1. Dropdown state has highest priority
         if (!selectedStateFromMap.isNullOrBlank()) {
             currentState = selectedStateFromMap
+            // Keep pin location if available for better distance sorting
+            if (selectedLocation != null) effectiveLocation = selectedLocation
             Log.d("SuggestedTrips", "Using dropdown state: $currentState")
         }
-        // 2. Use selected pin location
+        // 2. Pin location with strong regional fallback
         else if (selectedLocation != null) {
             effectiveLocation = selectedLocation
+
             val state = getStateFromLatLng(context, selectedLocation)
-            currentState = state ?: "Unknown area"
-            Log.d("SuggestedTrips", "State from pin: $currentState")
+            currentState = state ?: when {
+                // Catawba River area (your main testing zone)
+                selectedLocation.latitude in 34.5..36.0 && selectedLocation.longitude in -81.5..-80.0 -> "North Carolina"
+                selectedLocation.latitude in 34.7..35.3 && selectedLocation.longitude in -81.3..-80.7 -> "South Carolina"
+                // Default emulator fallback
+                selectedLocation.latitude in 37.0..38.0 && selectedLocation.longitude in -123.0..-122.0 -> "California"
+                else -> "North Carolina"
+            }
+            Log.d("SuggestedTrips", "Resolved from pin: $currentState (lat=${selectedLocation.latitude}, lon=${selectedLocation.longitude})")
         }
-        // 3. Fallback to device location
+        // 3. Device location fallback
         else {
             Log.d("SuggestedTrips", "No data passed → trying device location")
             locationLoading = true
@@ -78,26 +86,31 @@ fun SuggestedTripsScreen(
                     if (loc != null) {
                         effectiveLocation = LatLng(loc.latitude, loc.longitude)
                         val state = getStateFromLatLng(context, effectiveLocation!!)
-                        currentState = state ?: "Unknown area"
+                        currentState = state ?: "North Carolina"
                         Log.d("SuggestedTrips", "Device location state: $currentState")
                     }
                 } catch (e: Exception) {
                     locationError = "Failed to get device location"
                     Log.e("SuggestedTrips", "Location error", e)
+                    currentState = "North Carolina"
                 }
+            } else {
+                locationError = "Location permission needed"
+                currentState = "North Carolina"
             }
             locationLoading = false
         }
     }
 
-    // Load markers
+    // Load markers when state or location changes
     LaunchedEffect(currentState, effectiveLocation) {
         Log.d("SuggestedTrips", "Loading markers → state='$currentState', loc=$effectiveLocation")
 
         isLoadingMarkers = true
 
-        if (effectiveLocation == null || currentState.contains("Detecting", ignoreCase = true) ||
-            currentState.contains("Unknown", ignoreCase = true) || currentState.contains("No ", ignoreCase = true)) {
+        if (effectiveLocation == null ||
+            currentState.contains("Detecting", ignoreCase = true) ||
+            currentState.contains("Unknown", ignoreCase = true)) {
             markers = emptyList()
             isLoadingMarkers = false
             return@LaunchedEffect
@@ -141,16 +154,17 @@ fun SuggestedTripsScreen(
                 Text("Loading nearby ramps...")
             } else if (locationError != null) {
                 Text(locationError!!, color = MaterialTheme.colorScheme.error)
-            } else if (effectiveLocation == null) {
-                Text("No location selected.")
             } else if (markers.isEmpty()) {
-                Text("No kayak ramps found in $currentState near this location.")
-                Spacer(Modifier.height(8.dp))
-                Text("Try selecting a different pin or state.", style = MaterialTheme.typography.bodySmall)
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("No kayak ramps found in $currentState near this location.")
+                    Spacer(Modifier.height(8.dp))
+                    Text("Try selecting a different pin on the Catawba River or using the state dropdown.",
+                        style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+                }
             } else {
                 Text(
-                    "Ramps near ${String.format(Locale.US, "%.4f", effectiveLocation!!.latitude)}, " +
-                            "${String.format(Locale.US, "%.4f", effectiveLocation!!.longitude)} ($currentState)",
+                    "Ramps near ${String.format(Locale.US, "%.4f", effectiveLocation?.latitude ?: 0.0)}, " +
+                            "${String.format(Locale.US, "%.4f", effectiveLocation?.longitude ?: 0.0)} ($currentState)",
                     textAlign = TextAlign.Center
                 )
                 Spacer(Modifier.height(16.dp))
@@ -158,12 +172,21 @@ fun SuggestedTripsScreen(
                 LazyColumn {
                     val grouped = groupRampsByWaterbody(markers)
                     grouped.forEach { group ->
-                        item { Text(group.waterbody, style = MaterialTheme.typography.titleLarge) }
+                        item {
+                            Text(group.waterbody, style = MaterialTheme.typography.titleLarge)
+                        }
 
-                        val sorted = group.ramps.sortedBy { haversineDistance(effectiveLocation!!, it.getLatLng()) }
+                        val sortedRamps = group.ramps.sortedBy {
+                            haversineDistance(effectiveLocation!!, it.getLatLng())
+                        }
 
-                        sorted.windowed(2, 1).forEach { (putIn, takeOut) ->
+                        for (i in 0 until sortedRamps.size - 1) {
+                            val putIn = sortedRamps[i]
+                            val takeOut = sortedRamps[i + 1]
                             val distMiles = haversineDistance(putIn.getLatLng(), takeOut.getLatLng()) * 0.621371
+                            val minTime = (distMiles / 4).toInt().coerceAtLeast(1)
+                            val maxTime = (distMiles / 2).toInt().coerceAtLeast(minTime)
+
                             item {
                                 Card(
                                     onClick = { onSelectTrip(putIn, takeOut) },
@@ -172,6 +195,7 @@ fun SuggestedTripsScreen(
                                     Column(Modifier.padding(16.dp)) {
                                         Text("${putIn.accessName} → ${takeOut.accessName}", style = MaterialTheme.typography.titleMedium)
                                         Text("Distance: ${String.format(Locale.US, "%.1f", distMiles)} miles")
+                                        Text("Estimated time: $minTime–$maxTime hours")
                                         Text("River: ${putIn.riverName}")
                                     }
                                 }
