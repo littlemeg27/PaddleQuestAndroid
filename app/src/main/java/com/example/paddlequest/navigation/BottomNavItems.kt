@@ -25,13 +25,9 @@ sealed class Screen(val route: String, val label: String, val icon: ImageVector)
     object FloatPlan : Screen("floatplan", "Float Plan", Icons.Default.Create)
     object Weather : Screen("weather", "Weather", Icons.Default.Cloud)
     object Profile : Screen("profile", "Profile", Icons.Default.Person)
-
-    // Base route for bottom nav + deep links
     object SuggestedTripsScreen : Screen("suggestedTripsScreen", "Trips", Icons.Default.Map)
-
     object Settings : Screen("settings", "Settings", Icons.Default.Settings)
 
-    // Helper for parameterized navigation
     companion object {
         const val SUGGESTED_TRIPS_ROUTE = "suggestedTripsScreen/{lat}/{lon}/{state?}"
 

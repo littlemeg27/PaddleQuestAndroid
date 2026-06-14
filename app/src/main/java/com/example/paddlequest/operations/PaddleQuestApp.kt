@@ -112,22 +112,20 @@ fun PaddleQuestApp() {
             composable(Screen.Profile.route) { ProfileScreen() }
             composable(Screen.Settings.route) { SettingsScreen() }
 
-            // PARAMETERIZED ROUTE - THIS MUST MATCH THE BUTTON EXACTLY
+            // === KEY ROUTE: Simple parameterized route (MUST match button) ===
             composable(
-                route = Screen.SUGGESTED_TRIPS_ROUTE,
+                route = "suggestedTripsScreen/{lat}/{lon}",
                 arguments = listOf(
-                    navArgument("lat") { type = NavType.StringType; nullable = true },
-                    navArgument("lon") { type = NavType.StringType; nullable = true },
-                    navArgument("state") { type = NavType.StringType; nullable = true; defaultValue = null }
+                    navArgument("lat") { type = NavType.StringType },
+                    navArgument("lon") { type = NavType.StringType }
                 )
             ) { backStackEntry ->
-                val lat = backStackEntry.arguments?.getString("lat")?.toDoubleOrNull()
-                val lon = backStackEntry.arguments?.getString("lon")?.toDoubleOrNull()
-                val state = backStackEntry.arguments?.getString("state")
+                val lat = backStackEntry.arguments?.getString("lat")?.toDoubleOrNull() ?: 0.0
+                val lon = backStackEntry.arguments?.getString("lon")?.toDoubleOrNull() ?: 0.0
 
                 SuggestedTripsScreen(
-                    selectedLocation = if (lat != null && lon != null) LatLng(lat, lon) else null,
-                    selectedStateFromMap = state,
+                    selectedLocation = LatLng(lat, lon),
+                    selectedStateFromMap = null,
                     navController = navController,
                     onDismiss = { navController.popBackStack() },
                     onSelectTrip = { putIn, takeOut ->
@@ -138,7 +136,7 @@ fun PaddleQuestApp() {
                 )
             }
 
-            // Bottom bar version
+            // Bottom bar direct access
             composable(Screen.SuggestedTripsScreen.route) {
                 val selectedLocation by selectedPinViewModel.selectedPin.observeAsState()
                 val selectedState by selectedPinViewModel.selectedState.observeAsState()

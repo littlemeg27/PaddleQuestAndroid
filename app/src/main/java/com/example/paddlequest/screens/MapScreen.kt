@@ -367,8 +367,7 @@ fun MapScreen(
             onClick = {
                 val loc = currentLocation ?: selectedPin
                 if (loc != null) {
-                    val stateToUse = selectedState ?: currentState ?: "North Carolina"
-                    navController.navigate("suggestedTripsScreen/${loc.latitude}/${loc.longitude}/$stateToUse")
+                    navController.navigate("suggestedTripsScreen/${loc.latitude}/${loc.longitude}")
                 } else {
                     Toast.makeText(context, "No location available", Toast.LENGTH_SHORT).show()
                 }
