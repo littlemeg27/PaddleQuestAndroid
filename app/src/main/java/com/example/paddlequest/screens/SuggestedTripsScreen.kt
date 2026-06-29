@@ -1,7 +1,5 @@
 package com.example.paddlequest.screens
 
-import android.Manifest
-import android.content.pm.PackageManager
 import android.util.Log
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -14,23 +12,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
 import androidx.navigation.NavController
-import com.example.paddlequest.location.getStateFromLatLng
 import com.example.paddlequest.ramps.MarkerData
 import com.example.paddlequest.ramps.groupRampsByWaterbody
 import com.example.paddlequest.ramps.haversineDistance
 import com.example.paddlequest.ramps.loadMarkersForState
-import com.google.android.gms.location.LocationServices
 import com.google.android.gms.maps.model.LatLng
-import kotlinx.coroutines.tasks.await
 import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SuggestedTripsScreen(
-    selectedLocation: LatLng?,           // from map pin
-    selectedStateFromMap: String?,       // from dropdown (highest priority)
+    selectedLocation: LatLng?,
+    selectedStateFromMap: String?,
     navController: NavController,
     onDismiss: () -> Unit,
     onSelectTrip: (MarkerData, MarkerData) -> Unit
@@ -39,103 +33,82 @@ fun SuggestedTripsScreen(
 
     var effectiveLocation by remember { mutableStateOf(selectedLocation) }
     var currentState by remember { mutableStateOf(selectedStateFromMap ?: "Detecting…") }
-    var locationLoading by remember { mutableStateOf(false) }
-    var locationError by remember { mutableStateOf<String?>(null) }
-
     var markers by remember { mutableStateOf(emptyList<MarkerData>()) }
-    var isLoadingMarkers by remember { mutableStateOf(true) }
+    var anchorRampName by remember { mutableStateOf("your selected boat ramp") }
+    var isLoading by remember { mutableStateOf(true) }
 
-    // Priority: Dropdown > Pin > Device GPS
     LaunchedEffect(selectedLocation, selectedStateFromMap) {
-        Log.d("SuggestedTrips", "Init - pin=$selectedLocation, dropdown=$selectedStateFromMap")
+        Log.d("SuggestedTrips", "=== GRABBING CORRECT BOAT RAMP ===")
+        Log.d("SuggestedTrips", "Clicked location: $selectedLocation")
 
-        // 1. Dropdown state has highest priority
-        if (!selectedStateFromMap.isNullOrBlank()) {
-            currentState = selectedStateFromMap
-            // Keep pin location if available for better distance sorting
-            if (selectedLocation != null) effectiveLocation = selectedLocation
-            Log.d("SuggestedTrips", "Using dropdown state: $currentState")
-        }
-        // 2. Pin location with strong regional fallback
-        else if (selectedLocation != null) {
-            effectiveLocation = selectedLocation
+        val state = selectedStateFromMap ?: "North Carolina"
+        currentState = state
+        effectiveLocation = selectedLocation
 
-            val state = getStateFromLatLng(context, selectedLocation)
-            currentState = state ?: when {
-                // Catawba River area (your main testing zone)
-                selectedLocation.latitude in 34.5..36.0 && selectedLocation.longitude in -81.5..-80.0 -> "North Carolina"
-                selectedLocation.latitude in 34.7..35.3 && selectedLocation.longitude in -81.3..-80.7 -> "South Carolina"
-                // Default emulator fallback
-                selectedLocation.latitude in 37.0..38.0 && selectedLocation.longitude in -123.0..-122.0 -> "California"
-                else -> "North Carolina"
-            }
-            Log.d("SuggestedTrips", "Resolved from pin: $currentState (lat=${selectedLocation.latitude}, lon=${selectedLocation.longitude})")
-        }
-        // 3. Device location fallback
-        else {
-            Log.d("SuggestedTrips", "No data passed → trying device location")
-            locationLoading = true
-
-            val hasFine = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-            val hasCoarse = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
-
-            if (hasFine || hasCoarse) {
-                try {
-                    val fused = LocationServices.getFusedLocationProviderClient(context)
-                    val loc = fused.lastLocation.await()
-                    if (loc != null) {
-                        effectiveLocation = LatLng(loc.latitude, loc.longitude)
-                        val state = getStateFromLatLng(context, effectiveLocation!!)
-                        currentState = state ?: "North Carolina"
-                        Log.d("SuggestedTrips", "Device location state: $currentState")
-                    }
-                } catch (e: Exception) {
-                    locationError = "Failed to get device location"
-                    Log.e("SuggestedTrips", "Location error", e)
-                    currentState = "North Carolina"
-                }
-            } else {
-                locationError = "Location permission needed"
-                currentState = "North Carolina"
-            }
-            locationLoading = false
-        }
-    }
-
-    // Load markers when state or location changes
-    LaunchedEffect(currentState, effectiveLocation) {
-        Log.d("SuggestedTrips", "Loading markers → state='$currentState', loc=$effectiveLocation")
-
-        isLoadingMarkers = true
-
-        if (effectiveLocation == null ||
-            currentState.contains("Detecting", ignoreCase = true) ||
-            currentState.contains("Unknown", ignoreCase = true)) {
-            markers = emptyList()
-            isLoadingMarkers = false
-            return@LaunchedEffect
-        }
-
+        isLoading = true
         try {
-            val loaded = loadMarkersForState(context, currentState)
-            markers = loaded
-            Log.d("SuggestedTrips", "Loaded ${loaded.size} ramps for $currentState")
-        } catch (e: Throwable) {
-            Log.e("SuggestedTrips", "Load failed", e)
+            val allRamps = loadMarkersForState(context, state)
+
+            if (selectedLocation == null) {
+                markers = allRamps.take(30)
+                anchorRampName = "North Carolina"
+            } else {
+                // === STEP 1: Find the SINGLE closest ramp to the exact tap ===
+                val closestRamp = allRamps.minByOrNull {
+                    haversineDistance(selectedLocation, it.getLatLng())
+                }
+
+                val distanceToClosest = if (closestRamp != null) {
+                    haversineDistance(selectedLocation, closestRamp.getLatLng())
+                } else 999.0
+
+                Log.d("SuggestedTrips", "Closest ramp in DB: ${closestRamp?.accessName} (distance: ${"%.2f".format(distanceToClosest)} km)")
+
+                // === STEP 2: Only trust it as the anchor if it is VERY close (< 1.5 km) ===
+                anchorRampName = if (distanceToClosest < 1.5 && closestRamp != null) {
+                    closestRamp.accessName
+                } else {
+                    "your selected location"
+                }
+
+                // === STEP 3: Prefer ramps on the same waterbody as the closest ramp (if we trust it) ===
+                val preferredWaterbody = if (distanceToClosest < 1.5 && closestRamp != null) {
+                    closestRamp.riverName.ifBlank { closestRamp.otherName }
+                } else null
+
+                val filtered = if (preferredWaterbody != null) {
+                    allRamps.filter { ramp ->
+                        val dist = haversineDistance(selectedLocation, ramp.getLatLng())
+                        val sameWaterbody = ramp.riverName.equals(preferredWaterbody, ignoreCase = true) ||
+                                ramp.otherName.equals(preferredWaterbody, ignoreCase = true)
+                        dist < 50.0 && sameWaterbody
+                    }
+                } else {
+                    // Fallback: just use distance from the clicked point
+                    allRamps.filter { haversineDistance(selectedLocation, it.getLatLng()) < 50.0 }
+                }
+
+                markers = filtered.ifEmpty {
+                    allRamps.filter { haversineDistance(selectedLocation, it.getLatLng()) < 50.0 }
+                }
+
+                Log.d("SuggestedTrips", "Final ramps used: ${markers.size} (anchored to: $anchorRampName)")
+            }
+        } catch (e: Exception) {
+            Log.e("SuggestedTrips", "Failed to load", e)
             markers = emptyList()
         } finally {
-            isLoadingMarkers = false
+            isLoading = false
         }
     }
 
-    // UI
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Suggested Trips") },
                 navigationIcon = {
                     IconButton(onClick = { navController.popBackStack() }) {
-                        Icon(Icons.AutoMirrored.Default.ArrowBack, "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 }
             )
@@ -148,41 +121,42 @@ fun SuggestedTripsScreen(
                 .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            if (locationLoading || isLoadingMarkers) {
+            if (isLoading) {
                 CircularProgressIndicator()
-                Spacer(Modifier.height(16.dp))
-                Text("Loading nearby ramps...")
-            } else if (locationError != null) {
-                Text(locationError!!, color = MaterialTheme.colorScheme.error)
+                Spacer(Modifier.height(12.dp))
+                Text("Finding trips near $anchorRampName...")
             } else if (markers.isEmpty()) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("No kayak ramps found in $currentState near this location.")
-                    Spacer(Modifier.height(8.dp))
-                    Text("Try selecting a different pin on the Catawba River or using the state dropdown.",
-                        style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
-                }
+                Text(
+                    "No suitable ramps found near the boat ramp you tapped.\n\nTry clicking directly on a marker on the Catawba River or Mountain Island Lake.",
+                    textAlign = TextAlign.Center
+                )
             } else {
                 Text(
-                    "Ramps near ${String.format(Locale.US, "%.4f", effectiveLocation?.latitude ?: 0.0)}, " +
-                            "${String.format(Locale.US, "%.4f", effectiveLocation?.longitude ?: 0.0)} ($currentState)",
+                    "Trips near $anchorRampName",
+                    style = MaterialTheme.typography.titleMedium,
                     textAlign = TextAlign.Center
                 )
                 Spacer(Modifier.height(16.dp))
 
                 LazyColumn {
                     val grouped = groupRampsByWaterbody(markers)
+
                     grouped.forEach { group ->
                         item {
-                            Text(group.waterbody, style = MaterialTheme.typography.titleLarge)
+                            Text(
+                                group.waterbody,
+                                style = MaterialTheme.typography.titleLarge,
+                                modifier = Modifier.padding(vertical = 8.dp)
+                            )
                         }
 
-                        val sortedRamps = group.ramps.sortedBy {
-                            haversineDistance(effectiveLocation!!, it.getLatLng())
+                        val sorted = group.ramps.sortedBy {
+                            haversineDistance(effectiveLocation ?: it.getLatLng(), it.getLatLng())
                         }
 
-                        for (i in 0 until sortedRamps.size - 1) {
-                            val putIn = sortedRamps[i]
-                            val takeOut = sortedRamps[i + 1]
+                        for (i in 0 until sorted.size - 1) {
+                            val putIn = sorted[i]
+                            val takeOut = sorted[i + 1]
                             val distMiles = haversineDistance(putIn.getLatLng(), takeOut.getLatLng()) * 0.621371
                             val minTime = (distMiles / 4).toInt().coerceAtLeast(1)
                             val maxTime = (distMiles / 2).toInt().coerceAtLeast(minTime)
@@ -190,7 +164,9 @@ fun SuggestedTripsScreen(
                             item {
                                 Card(
                                     onClick = { onSelectTrip(putIn, takeOut) },
-                                    modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 6.dp)
                                 ) {
                                     Column(Modifier.padding(16.dp)) {
                                         Text("${putIn.accessName} → ${takeOut.accessName}", style = MaterialTheme.typography.titleMedium)
